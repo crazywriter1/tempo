@@ -15,7 +15,8 @@
 #   BENCH_SAMPLY                  – "true" to enable samply profiling (optional)
 set -euxo pipefail
 
-SCHELK_MOUNT="/reth-bench"
+eval "$(nu bench-schelk.nu detect)"
+
 BENCH_WORK_DIR="${BENCH_WORK_DIR:-bench-results/replay}"
 SNAPSHOT_BUCKET="r2-tempo-snapshots/tempo-node-snapshots"
 TEMPO_SCOPE="tempo-replay.scope"
@@ -72,6 +73,10 @@ else
   unset OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
   unset OTEL_EXPORTER_OTLP_HEADERS
 fi
+
+bench_schelk() {
+  nu bench-schelk.nu "$@"
+}
 
 # ============================================================================
 # Install txgen-tempo and bench-cli
@@ -143,8 +148,7 @@ LOCAL_HASH=""
 [ -f "$SNAPSHOT_HASH_FILE" ] && LOCAL_HASH=$(cat "$SNAPSHOT_HASH_FILE")
 
 # Mount schelk before checking $DATADIR/db existence
-sudo schelk recover -y --kill 2>/dev/null || true
-sudo schelk mount -y
+bench_schelk restore "$SCHELK_STATE_PATH" "$SCHELK_MOUNT"
 
 if [ "$REMOTE_HASH" != "$LOCAL_HASH" ] || [ ! -d "$DATADIR/db" ]; then
   if [ -n "$LOCAL_HASH" ]; then
@@ -156,6 +160,7 @@ if [ "$REMOTE_HASH" != "$LOCAL_HASH" ] || [ ! -d "$DATADIR/db" ]; then
   MANIFEST_URL="https://tempo-node-snapshots.tempoxyz.dev/${SNAPSHOT_NAME}/manifest.json"
 
   # Prepare schelk volume for fresh download
+  bench_schelk mark-dirty "$SCHELK_STATE_PATH"
   sudo rm -rf "$DATADIR"
   sudo mkdir -p "$DATADIR"
   sudo chown -R "$(id -u):$(id -g)" "$DATADIR"
@@ -174,7 +179,7 @@ if [ "$REMOTE_HASH" != "$LOCAL_HASH" ] || [ ! -d "$DATADIR/db" ]; then
   fi
 
   sync
-  sudo schelk promote -y
+  bench_schelk promote "$SCHELK_STATE_PATH"
   echo "$REMOTE_HASH" > "$SNAPSHOT_HASH_FILE"
   echo "Snapshot promoted to schelk baseline"
 else
@@ -195,12 +200,11 @@ run_single() {
   # Recover snapshot
   sudo systemctl stop "$TEMPO_SCOPE" 2>/dev/null || true
   sudo systemctl reset-failed "$TEMPO_SCOPE" 2>/dev/null || true
-  sudo schelk recover -y --kill || sudo schelk full-recover -y || true
-  sudo schelk mount -y
-  sudo chown -R "$(id -u):$(id -g)" "$SCHELK_MOUNT"
+  bench_schelk restore "$SCHELK_STATE_PATH" "$SCHELK_MOUNT"
 
   sync
   sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'
+  bench_schelk mark-dirty "$SCHELK_STATE_PATH"
 
   # Build node args
   local NODE_ARGS=(
@@ -316,7 +320,7 @@ run_single() {
   sudo systemctl stop "$TEMPO_SCOPE" 2>/dev/null || true
   sudo systemctl reset-failed "$TEMPO_SCOPE" 2>/dev/null || true
   sudo chown -R "$(id -un):$(id -gn)" "$output_dir" 2>/dev/null || true
-  sudo schelk recover -y --kill || true
+  bench_schelk cleanup "$SCHELK_STATE_PATH" || true
   echo "=== Finished run: $label ==="
 }
 
