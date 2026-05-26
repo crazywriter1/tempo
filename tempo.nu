@@ -785,6 +785,14 @@ def grafana-performance-url [benchmark_id: string, from_ms: int, to_ms: int] {
     $"https://tempoxyz.grafana.net/d/performance/performance?orgId=1&from=($from)&to=($to)&timezone=browser&var-datasource=efk1hcn87dnnkd&var-filter_label=benchmark_id&var-filter_value=($benchmark_id)&var-group_by=benchmark_run"
 }
 
+def internal-perf-url [clickhouse_run_id: string] {
+    if $clickhouse_run_id == "" {
+        return ""
+    }
+
+    $"http://go/dev/tempo-internal-perf/benchmark/($clickhouse_run_id)"
+}
+
 
 def generate-summary [
     results_dir: string,
@@ -1235,6 +1243,13 @@ def generate-summary [
 
     # Build summary markdown
     let grafana_url = (grafana-performance-url $benchmark_id $observability_from_ms $observability_to_ms)
+    let clickhouse_run_id_path = $"($results_dir)/clickhouse-run-id.txt"
+    let clickhouse_run_id = if ($clickhouse_run_id_path | path exists) {
+        open --raw $clickhouse_run_id_path | str trim
+    } else {
+        ""
+    }
+    let internal_perf_url = (internal-perf-url $clickhouse_run_id)
     mut config_lines = [
         $"# Bench Comparison: ($baseline_ref) vs ($feature_ref)"
         ""
@@ -1331,6 +1346,8 @@ def generate-summary [
             to: (if $actual_observability_to_ms > 0 { iso-from-epoch-ms $actual_observability_to_ms } else { "" })
         }
         grafana_url: $grafana_url
+        clickhouse_run_id: $clickhouse_run_id
+        internal_perf_url: $internal_perf_url
         baseline_ref: $baseline_ref
         feature_ref: $feature_ref
         config: {
